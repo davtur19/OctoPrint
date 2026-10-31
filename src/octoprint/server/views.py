@@ -1622,6 +1622,54 @@ def fetch_template_data(refresh=False):
     return templates, plugin_names, plugin_vars
 
 
+def _template_folders(loader):
+    """Return the template folders of a loader.
+
+    Loaders that map a prefix to another loader (the plugin template folders) are
+    not descended into, since those belong to one specific template prefix.
+    """
+    folders = []
+
+    def collect(current, depth=0):
+        if current is None or depth > 8:
+            return
+        folders.extend(getattr(current, "searchpath", None) or [])
+        if isinstance(getattr(current, "mapping", None), dict):
+            return
+        for attribute in ("loaders", "loader"):
+            sub = getattr(current, attribute, None)
+            if isinstance(sub, (list, tuple)):
+                for item in sub:
+                    collect(item, depth + 1)
+            elif sub is not None:
+                collect(sub, depth + 1)
+
+    collect(loader)
+    return folders
+
+
+def _template_exists(template):
+    """Check whether a template name resolves in the current jinja environment.
+
+    `_process_template_config()` prefixes the name with the plugin's template
+    folder key, so a prefixed name can only be found in that plugin's folders.
+    Unprefixed names are the deprecated legacy form and are searched everywhere.
+    """
+    prefix_loader = getattr(app.jinja_env, "prefix_loader", None)
+    mapping = getattr(prefix_loader, "mapping", None) or {}
+
+    prefix, sep, name = template.partition("/")
+    if sep and prefix in mapping:
+        folders = _template_folders(mapping[prefix])
+    else:
+        name = template
+        folders = _template_folders(app.jinja_loader)
+        for loader in mapping.values():
+            folders += _template_folders(loader)
+
+    return any(os.path.isfile(os.path.join(folder, name)) for folder in folders)
+
+
 def _process_template_configs(name, implementation, configs, rules):
     from jinja2.exceptions import TemplateNotFound
 
@@ -1661,17 +1709,7 @@ def _process_template_configs(name, implementation, configs, rules):
 
             data = _process_template_config(name, implementation, rule)
             if data is not None:
-                try:
-                    app.jinja_env.get_or_select_template(data["template"])
-                except TemplateNotFound:
-                    pass
-                except Exception:
-                    _logger.exception(
-                        "Error in template {}, not going to include it".format(
-                            data["template"]
-                        )
-                    )
-                else:
+                if _template_exists(data["template"]):
                     includes[template_type].append(rule["to_entry"](data))
 
     return includes
