@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from flask import abort, jsonify, request
+from flask import abort, g, jsonify, request
 from flask_login import current_user
 
 import octoprint.plugin
@@ -383,6 +383,11 @@ def getSettings():
 
 
 def _get_plugin_settings():
+    # computed twice per request otherwise (once by _etag(), once by getSettings()),
+    # so one pass of the plugin hooks is enough
+    if "_octo_plugin_settings" in g:
+        return g._octo_plugin_settings
+
     logger = logging.getLogger(__name__)
 
     data = {}
@@ -417,6 +422,7 @@ def _get_plugin_settings():
                 extra={"plugin": plugin._identifier},
             )
 
+    g._octo_plugin_settings = data
     return data
 
 
@@ -431,6 +437,8 @@ def setSettings():
     response = _saveSettings(data)
     if response:
         return response
+    # settings changed, drop the memo
+    g.pop("_octo_plugin_settings", None)
     return getSettings()
 
 
