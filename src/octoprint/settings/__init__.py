@@ -290,10 +290,14 @@ class HierarchicalChainMap:
         recomputing the list every time.
         """
         if prefix not in self._prefixed_keys:
-            keys = [k for k in self._chainmap.keys() if k.startswith(prefix)]
-            if keys:
-                self._prefixed_keys[prefix] = keys
-        return self._prefixed_keys.get(prefix, [])
+            # Keep empty prefix results too. A miss is the common
+            # case here, and not caching it means re-enumerating every key of
+            # every layer on each call. Invalidation works on key presence, so
+            # an empty entry is invalidated exactly like a non-empty one.
+            self._prefixed_keys[prefix] = [
+                k for k in self._chainmap.keys() if k.startswith(prefix)
+            ]
+        return self._prefixed_keys[prefix]
 
     def _invalidate_prefixed_keys(self, prefix: str) -> None:
         """
